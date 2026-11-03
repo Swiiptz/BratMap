@@ -118,7 +118,10 @@ export async function importBackup(backup: BackupFile) {
     if (documents?.length)
       await store.putMany(
         collection,
-        documents.filter((document): document is StoredDocument => typeof document?.id === 'string'),
+        documents
+          .filter((document): document is StoredDocument => typeof document?.id === 'string')
+          // Un document sans `deletedAt` serait invisible (les abonnements filtrent sur deletedAt == null).
+          .map((document) => ({ ...document, deletedAt: document.deletedAt ?? null })),
       );
   }
 }

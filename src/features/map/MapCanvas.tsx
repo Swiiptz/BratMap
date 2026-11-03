@@ -8,7 +8,8 @@ import { registerPingImages } from './pingImages';
 import { labelMinZoom, type LabelDensity } from '../../domain/appConfig';
 import { LANDMARKS_URL, mainZone, mainZoneBounds, parseFeatureRef, zoneMask, type LayerVisibility, type MapFeatures } from './mapData';
 
-export type MapTool = 'idle' | 'place' | 'draw' | 'area' | 'line' | 'measure';
+/** `pick` : un seul point à choisir (départ / arrivée d'itinéraire). */
+export type MapTool = 'idle' | 'place' | 'draw' | 'area' | 'line' | 'measure' | 'pick';
 /** Outils qui tracent un polygone (fermeture sur le premier sommet, aperçu rempli). */
 const isPolygonTool = (tool: MapTool) => tool === 'draw' || tool === 'area';
 export type FlyTarget = { token: number; center?: Coordinate; zoom?: number; bounds?: [Coordinate, Coordinate] };
@@ -676,7 +677,8 @@ export function MapCanvas(props: Props) {
               ? `${draft.length + 1} sommets · ${formatArea(ringAreaM2([...draft, point]))}`
               : 'Clique pour poser les sommets';
       else if (draft.length > 0) text = `${formatDistance(lineLengthM([...draft, point]))}${target?.kind === 'node' ? ' · raccordement' : ''}`;
-      else text = tool === 'line' ? (target ? 'Partir de ce nœud' : 'Clique pour commencer le segment') : 'Clique pour commencer';
+      else
+        text = tool === 'line' ? (target ? 'Partir de ce nœud' : 'Clique pour commencer le segment') : tool === 'pick' ? 'Cliquer pour placer le point' : 'Clique pour commencer';
       readout.setLngLat(point).setText(text).addTo(map);
     };
     map.on('mousemove', (event) => {
@@ -779,6 +781,32 @@ export function MapCanvas(props: Props) {
       if (latest.current.tool === 'idle') map.easeTo({ center: event.lngLat, zoom: map.getZoom() + 1, duration: 300 });
       else latest.current.onDoubleClick();
     });
+    // Appui long (écran tactile) : équivalent du clic droit.
+    let pressTimer: number | undefined;
+    let pressStart: maplibregl.Point | undefined;
+    const cancelPress = () => {
+      window.clearTimeout(pressTimer);
+      pressTimer = undefined;
+    };
+    map.on('touchstart', (event) => {
+      cancelPress();
+      if (event.originalEvent.touches.length !== 1) return;
+      pressStart = event.point;
+      const coordinate: Coordinate = [event.lngLat.lng, event.lngLat.lat];
+      pressTimer = window.setTimeout(() => {
+        pressTimer = undefined;
+        suppressClick = true;
+        navigator.vibrate?.(12);
+        latest.current.onContextMenu(coordinate, { x: event.point.x, y: event.point.y });
+      }, 550);
+    });
+    map.on('touchmove', (event) => {
+      if (pressStart && Math.hypot(event.point.x - pressStart.x, event.point.y - pressStart.y) > 10) cancelPress();
+    });
+    map.on('touchend', cancelPress);
+    map.on('touchcancel', cancelPress);
+    map.on('movestart', cancelPress);
+
     map.on('contextmenu', (event) => {
       event.preventDefault();
       latest.current.onContextMenu(lngLat(event), { x: event.point.x, y: event.point.y });
@@ -1077,9 +1105,17 @@ export function MapCanvas(props: Props) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !flyTarget) return;
+    // Sur téléphone, la fiche occupe le bas de l'écran : on cadre dans la moitié haute.
+    const phone = window.innerWidth <= 900;
+    const sheet = phone ? Math.round(window.innerHeight * 0.45) : 0;
     if (flyTarget.bounds)
-      map.fitBounds(flyTarget.bounds, { padding: window.innerWidth > 900 ? { top: 120, bottom: 80, left: 360, right: 420 } : 30, maxZoom: 16.5, duration: 700 });
-    else if (flyTarget.center) map.flyTo({ center: flyTarget.center, zoom: flyTarget.zoom ?? Math.max(map.getZoom(), 15), duration: 700 });
+      map.fitBounds(flyTarget.bounds, {
+        padding: phone ? { top: 70, bottom: sheet + 20, left: 24, right: 24 } : { top: 120, bottom: 80, left: 360, right: 420 },
+        maxZoom: 16.5,
+        duration: 700,
+      });
+    else if (flyTarget.center)
+      map.flyTo({ center: flyTarget.center, zoom: flyTarget.zoom ?? Math.max(map.getZoom(), 15), padding: { top: 0, bottom: sheet, left: 0, right: 0 }, duration: 700 });
   }, [flyTarget]);
 
   useEffect(() => {

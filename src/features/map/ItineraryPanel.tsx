@@ -54,10 +54,29 @@ type Props = {
   onRouteChange: (route: FeatureCollection | undefined) => void;
   onOpen: (ref: EntityRef) => void;
   onClose: () => void;
+  /** Choisir le départ ou l'arrivée d'une touche sur la carte (le panneau se replie le temps du choix). */
+  onPickOnMap: (role: 'start' | 'end') => void;
+  picking?: 'start' | 'end';
+  onCancelPick: () => void;
 };
 
 /** Itinéraires (CDC §12) : modes Rapide, Discret et Souterrain, comparaison des variantes, lecture narrative du trajet. */
-export function ItineraryPanel({ points, onPointsChange, mode, onModeChange, profile, onProfileChange, onRouteChange, onOpen, onClose }: Props) {
+export function ItineraryPanel({
+  points,
+  onPointsChange,
+  mode,
+  onModeChange,
+  profile,
+  onProfileChange,
+  onRouteChange,
+  onOpen,
+  onClose,
+  onPickOnMap,
+  picking,
+  onCancelPick,
+}: Props) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [locating, setLocating] = useState(false);
   const data = useChronicle();
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [selected, setSelected] = useState(0);
@@ -208,242 +227,338 @@ export function ItineraryPanel({ points, onPointsChange, mode, onModeChange, pro
     if (!place?.coordinate) return;
     onPointsChange(points.map((point, i) => (i === index ? { coordinate: place.coordinate as Coordinate, label: place.name } : point)));
   };
+  /** Remplit le départ ou l'arrivée, en gardant le départ en tête et l'arrivée en dernier. */
+  const setSlot = (role: 'start' | 'end', point: RoutePoint) => {
+    if (role === 'start') onPointsChange(points.length ? [point, ...points.slice(1)] : [point]);
+    else onPointsChange(points.length >= 2 ? [...points.slice(0, -1), point] : [...points, point]);
+  };
+  const choosePlace = (role: 'start' | 'end', value: string) => {
+    const place = places.find((item) => item.id === value);
+    if (place?.coordinate) setSlot(role, { coordinate: place.coordinate as Coordinate, label: place.name });
+  };
+  const locateMe = () => {
+    if (!navigator.geolocation) return setMessage('Géolocalisation indisponible sur cet appareil.');
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocating(false);
+        setSlot('start', { coordinate: [position.coords.longitude, position.coords.latitude], label: 'Ma position' });
+      },
+      () => {
+        setLocating(false);
+        setMessage('Position refusée ou introuvable.');
+      },
+      { enableHighAccuracy: true, timeout: 10_000 },
+    );
+  };
+  const missing: Array<'start' | 'end'> = points.length === 0 ? ['start', 'end'] : points.length === 1 ? ['end'] : [];
+
+  if (picking)
+    return (
+      <aside className="floating-panel itinerary-panel picking" aria-label="Itinéraire">
+        <p>
+          <b>{picking === 'start' ? 'Départ' : 'Arrivée'}</b> : touche la carte à l'endroit voulu.
+        </p>
+        <button type="button" className="ghost-button" onClick={onCancelPick}>
+          Annuler
+        </button>
+      </aside>
+    );
 
   return (
-    <aside className="floating-panel itinerary-panel" aria-label="Itinéraire">
+    <aside className={collapsed ? 'floating-panel itinerary-panel collapsed' : 'floating-panel itinerary-panel'} aria-label="Itinéraire">
       <header>
-        <span className="eyebrow">ITINÉRAIRE</span>
+        <button type="button" className="itinerary-toggle" aria-expanded={!collapsed} onClick={() => setCollapsed(!collapsed)}>
+          <span className="eyebrow">ITINÉRAIRE</span>
+          {current && (
+            <span className="itinerary-summary">
+              {formatDistance(current.distanceM)} · {formatDuration(current.durationMin)}
+            </span>
+          )}
+          <span className="chevron" aria-hidden="true">
+            ›
+          </span>
+        </button>
         <button className="close-button" onClick={onClose} aria-label="Fermer l'itinéraire">
           ×
         </button>
       </header>
-      <div className="segmented route-mode" role="radiogroup" aria-label="Mode">
-        {modes.map((item) => (
-          <button
-            key={item.id}
-            role="radio"
-            aria-checked={mode === item.id}
-            title={item.title}
-            className={mode === item.id ? 'selected' : ''}
-            onClick={() => onModeChange(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-      {mode !== 'underground' && (
-        <div className="segmented" role="radiogroup" aria-label="Mode par défaut des tronçons" title="Mode par défaut ; chaque tronçon peut être changé ci-dessous">
-          <button role="radio" aria-checked={profile === 'foot'} className={profile === 'foot' ? 'selected' : ''} onClick={() => onProfileChange('foot')}>
-            À pied
-          </button>
-          <button role="radio" aria-checked={profile === 'car'} className={profile === 'car' ? 'selected' : ''} onClick={() => onProfileChange('car')}>
-            En voiture
-          </button>
-        </div>
-      )}
-
-      <ol className="route-points">
-        {points.map((point, index) => (
-          <li key={index}>
-            <span className={`route-pin ${index === 0 ? 'start' : index === points.length - 1 ? 'end' : ''}`}>{index === 0 ? 'A' : index === points.length - 1 ? 'B' : index}</span>
-            <div>
-              <small>{pointLabel(index, points.length)}</small>
-              <select value="" onChange={(event) => setPoint(index, event.target.value)} aria-label={`${pointLabel(index, points.length)} : choisir un lieu`}>
-                <option value="">{point.label}</option>
-                {places.map((place) => (
-                  <option key={place.id} value={place.id}>
-                    {place.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {points.length > 2 && index > 0 && index < points.length - 1 && (
-              <button className="icon-button" aria-label="Retirer l'étape" onClick={() => onPointsChange(points.filter((_, i) => i !== index))}>
-                ×
+      {!collapsed && (
+        <>
+          <div className="segmented route-mode" role="radiogroup" aria-label="Mode">
+            {modes.map((item) => (
+              <button
+                key={item.id}
+                role="radio"
+                aria-checked={mode === item.id}
+                title={item.title}
+                className={mode === item.id ? 'selected' : ''}
+                onClick={() => onModeChange(item.id)}
+              >
+                {item.label}
               </button>
-            )}
-            {index < points.length - 1 && mode !== 'underground' && (
-              <div className="leg-travel" role="radiogroup" aria-label="Mode du tronçon suivant">
-                {(['car', 'foot'] as const).map((travel) => (
+            ))}
+          </div>
+          {mode !== 'underground' && (
+            <div className="segmented" role="radiogroup" aria-label="Mode par défaut des tronçons" title="Mode par défaut ; chaque tronçon peut être changé ci-dessous">
+              <button role="radio" aria-checked={profile === 'foot'} className={profile === 'foot' ? 'selected' : ''} onClick={() => onProfileChange('foot')}>
+                À pied
+              </button>
+              <button role="radio" aria-checked={profile === 'car'} className={profile === 'car' ? 'selected' : ''} onClick={() => onProfileChange('car')}>
+                En voiture
+              </button>
+            </div>
+          )}
+
+          <ol className="route-points">
+            {points.map((point, index) => (
+              <li key={index}>
+                <span className={`route-pin ${index === 0 ? 'start' : index === points.length - 1 ? 'end' : ''}`}>
+                  {index === 0 ? 'A' : index === points.length - 1 ? 'B' : index}
+                </span>
+                <div>
+                  <small>{pointLabel(index, points.length)}</small>
+                  <select value="" onChange={(event) => setPoint(index, event.target.value)} aria-label={`${pointLabel(index, points.length)} : choisir un lieu`}>
+                    <option value="">{point.label}</option>
+                    {places.map((place) => (
+                      <option key={place.id} value={place.id}>
+                        {place.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {(index === 0 || index === points.length - 1) && points.length >= 1 && (
                   <button
-                    key={travel}
-                    role="radio"
-                    aria-checked={(point.travel ?? profile) === travel}
-                    className={(point.travel ?? profile) === travel ? 'selected' : ''}
-                    onClick={() => onPointsChange(points.map((item, i) => (i === index ? { ...item, travel } : item)))}
+                    className="icon-button"
+                    title="Choisir sur la carte"
+                    aria-label={`${pointLabel(index, points.length)} : choisir sur la carte`}
+                    onClick={() => onPickOnMap(index === 0 ? 'start' : 'end')}
                   >
-                    {travel === 'car' ? '🚗 voiture' : '🚶 à pied'}
+                    ⌖
                   </button>
-                ))}
+                )}
+                {points.length > 2 && index > 0 && index < points.length - 1 && (
+                  <button className="icon-button" aria-label="Retirer l'étape" onClick={() => onPointsChange(points.filter((_, i) => i !== index))}>
+                    ×
+                  </button>
+                )}
+                {index < points.length - 1 && mode !== 'underground' && (
+                  <div className="leg-travel" role="radiogroup" aria-label="Mode du tronçon suivant">
+                    {(['car', 'foot'] as const).map((travel) => (
+                      <button
+                        key={travel}
+                        role="radio"
+                        aria-checked={(point.travel ?? profile) === travel}
+                        className={(point.travel ?? profile) === travel ? 'selected' : ''}
+                        onClick={() => onPointsChange(points.map((item, i) => (i === index ? { ...item, travel } : item)))}
+                      >
+                        {travel === 'car' ? '🚗 voiture' : '🚶 à pied'}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ol>
+          {missing.map((role) => (
+            <div key={role} className="route-slot">
+              <span className={`route-pin ${role}`}>{role === 'start' ? 'A' : 'B'}</span>
+              <div>
+                <small>{role === 'start' ? 'Départ' : 'Arrivée'}</small>
+                <select
+                  value=""
+                  disabled={role === 'end' && points.length === 0}
+                  onChange={(event) => choosePlace(role, event.target.value)}
+                  aria-label={`${role === 'start' ? 'Départ' : 'Arrivée'} : choisir un lieu`}
+                >
+                  <option value="">{role === 'end' && points.length === 0 ? 'Choisis d’abord le départ' : 'Choisir un lieu…'}</option>
+                  {places.map((place) => (
+                    <option key={place.id} value={place.id}>
+                      {place.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="route-slot-actions">
+                  <button type="button" className="ghost-button" disabled={role === 'end' && points.length === 0} onClick={() => onPickOnMap(role)}>
+                    ⌖ Sur la carte
+                  </button>
+                  {role === 'start' && (
+                    <button type="button" className="ghost-button" disabled={locating} onClick={locateMe}>
+                      {locating ? 'Localisation…' : '◎ Ma position'}
+                    </button>
+                  )}
+                </div>
               </div>
-            )}
-          </li>
-        ))}
-      </ol>
-      {points.length < 2 && <p className="muted">Clic droit sur la carte : « Départ ici », « Arrivée ici », « Ajouter une étape ».</p>}
-      {mode === 'underground' && (
-        <label
-          className="checkbox manhole-toggle"
-          title="Hypothèse narrative : entrer ou sortir du réseau discret (égouts, rivières) par une jonction proche, comme par un regard."
-        >
-          <input type="checkbox" checked={allowManholes} onChange={(event) => setAllowManholes(event.target.checked)} /> Autoriser les regards supposés (égouts, rivières)
-        </label>
-      )}
-      {mode === 'underground' && points.length > 2 && <p className="muted">Le mode souterrain relie le départ à l'arrivée ; les étapes ne sont pas prises en compte.</p>}
-      {points.length >= 2 && mode !== 'underground' && (
-        <div className="parking-tools">
-          <button type="button" className="ghost-button" onClick={() => setParking(suggestParking(data, points[points.length - 1].coordinate))}>
-            🅿 Stationnement stratégique avant l'arrivée
-          </button>
-          {parking && parking.length === 0 && (
-            <p className="muted">Aucun parking connu à moins de 1,2 km. Marque un lieu avec le tag « parking » pour l'ajouter aux suggestions.</p>
-          )}
-          {parking?.map((place) => (
-            <button
-              key={`${place.coordinate.join(',')}`}
-              className="result-row"
-              onClick={() => {
-                // Voiture jusqu'au parking, puis à pied jusqu'à l'arrivée.
-                const before = points.slice(0, -1).map((point, i) => (i === points.length - 2 ? { ...point, travel: 'car' as const } : point));
-                onPointsChange([...before, { coordinate: place.coordinate, label: `🅿 ${place.name}`, travel: 'foot' }, points[points.length - 1]]);
-                setParking(undefined);
-              }}
-            >
-              <span>🅿 {place.name}</span>
-              <small>
-                {place.reason} · {formatDistance(place.walkM)} à pied
-              </small>
-            </button>
-          ))}
-        </div>
-      )}
-      {status === 'loading' && <p className="muted">Calcul en cours…</p>}
-      {message && <p className="muted hint">{message}</p>}
-
-      {candidates.length > 1 && (
-        <div className="route-candidates" role="radiogroup" aria-label="Variantes">
-          {candidates.map((candidate, index) => (
-            <button
-              key={candidate.id}
-              role="radio"
-              aria-checked={selected === index}
-              className={selected === index ? 'route-card selected' : 'route-card'}
-              onClick={() => setSelected(index)}
-            >
-              <strong>{candidate.label}</strong>
-              <span>
-                {formatDistance(candidate.distanceM)} · {formatDuration(candidate.durationMin)}
-              </span>
-              <span className={`risk-badge ${riskClass[candidate.analysis.risk]}`}>{candidate.analysis.risk}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {current && (
-        <div className="route-summary">
-          <div className="route-headline">
-            <span
-              className={`risk-badge ${riskClass[current.underground ? (riskRank[current.underground.risk as keyof typeof riskRank] > riskRank[current.analysis.risk] ? current.underground.risk : current.analysis.risk) : current.analysis.risk]}`}
-            >
-              Risque{' '}
-              {current.underground && riskRank[current.underground.risk as keyof typeof riskRank] > riskRank[current.analysis.risk]
-                ? current.underground.risk
-                : current.analysis.risk}
-            </span>
-            <strong>{formatDistance(current.distanceM)}</strong>
-            <span>· {formatDuration(current.durationMin)}</span>
-          </div>
-          {current.underground && (
-            <p className="route-line">
-              ▼ Entrée <b>{current.underground.entry}</b> → sortie <b>{current.underground.exit}</b> · {formatDistance(current.underground.lengthM)} sous terre ·{' '}
-              {current.underground.levels.map((level) => `${level} (${levelNames[level as 0 | -1 | -2 | -3]})`).join(' → ')}
-              {Boolean(current.underground.transitLines?.length) && <> · le long de {current.underground.transitLines?.join(', ')}</>}
-            </p>
-          )}
-          <h3>Territoires traversés</h3>
-          {current.analysis.territories.length === 0 && <p className="muted">Aucun territoire défini sur ce trajet.</p>}
-          {current.analysis.territories.map((crossing) => (
-            <div key={crossing.territoryId} className={`crossing ${crossing.stance ?? ''}`}>
-              <button className="link-button" onClick={() => onOpen({ collection: 'territories', id: crossing.territoryId })}>
-                {crossing.name}
-              </button>
-              <small>
-                {formatDistance(crossing.distanceM)}
-                {crossing.stance && ` · ${stanceOptions.find((option) => option.id === crossing.stance)?.name.toLowerCase()}`}
-              </small>
-              {crossing.traditions.length > 0 && <p>{crossing.traditions.map((tradition) => `${tradition.name}${tradition.note ? ` : ${tradition.note}` : ''}`).join(' · ')}</p>}
             </div>
           ))}
-          {current.analysis.dangers.length > 0 && (
-            <>
-              <h3>Zones à risque</h3>
-              {current.analysis.dangers.map((danger) => (
-                <button key={danger.id} className="result-row" onClick={() => onOpen(danger)}>
-                  <span>⚠ {danger.name}</span>
-                  <small>à {formatDistance(danger.distanceM)}</small>
-                </button>
-              ))}
-            </>
-          )}
-          {current.analysis.places.length > 0 && (
-            <>
-              <h3>Lieux importants proches</h3>
-              {current.analysis.places.slice(0, 6).map((place) => (
-                <button key={`${place.collection}/${place.id}`} className="result-row" onClick={() => onOpen(place)}>
-                  <span>{entityName(data, place)}</span>
-                  <small>à {formatDistance(place.distanceM)}</small>
-                </button>
-              ))}
-            </>
-          )}
-          <p className="sheet-dates">
-            Rues : {provider.label}. Le risque ne repose que sur les données de la chronique ; en voiture, un territoire hostile expose moins qu'à pied.
-          </p>
-        </div>
-      )}
-
-      <section className="saved-routes">
-        <h3>Itinéraires enregistrés</h3>
-        {points.length >= 2 && (
-          <form
-            className="save-route"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!saveName.trim()) return;
-              void store.create('itineraries', {
-                name: saveName.trim(),
-                mode,
-                points: points.map((point) => ({ coordinate: point.coordinate, label: point.label, travel: point.travel ?? null })),
-              });
-              setSaveName('');
-            }}
-          >
-            <input value={saveName} placeholder="Nom (ex. Havre → Elyseum, discret)" onChange={(event) => setSaveName(event.target.value)} />
-            <button className="ghost-button">Enregistrer</button>
-          </form>
-        )}
-        {data.itineraries.length === 0 && <p className="muted">Aucun itinéraire enregistré. Ils sont partagés avec l'autre joueur.</p>}
-        {data.itineraries.map((saved) => (
-          <div key={saved.id} className="saved-route">
-            <button
-              className="result-row"
-              onClick={() => {
-                onModeChange(saved.mode as RouteMode);
-                onPointsChange(saved.points.map((point) => ({ coordinate: point.coordinate, label: point.label, travel: point.travel ?? undefined })));
-              }}
+          {points.length < 2 && <p className="muted">Astuce : clic droit (ou appui long sur téléphone) sur la carte → « Départ ici » / « Arrivée ici ».</p>}
+          {mode === 'underground' && (
+            <label
+              className="checkbox manhole-toggle"
+              title="Hypothèse narrative : entrer ou sortir du réseau discret (égouts, rivières) par une jonction proche, comme par un regard."
             >
-              <span>{saved.name}</span>
-              <small>
-                {modes.find((item) => item.id === saved.mode)?.label} · {saved.points.length} points
-              </small>
-            </button>
-            <button className="icon-button" aria-label={`Supprimer ${saved.name}`} onClick={() => void store.remove('itineraries', saved.id)}>
-              ×
-            </button>
-          </div>
-        ))}
-      </section>
+              <input type="checkbox" checked={allowManholes} onChange={(event) => setAllowManholes(event.target.checked)} /> Autoriser les regards supposés (égouts, rivières)
+            </label>
+          )}
+          {mode === 'underground' && points.length > 2 && <p className="muted">Le mode souterrain relie le départ à l'arrivée ; les étapes ne sont pas prises en compte.</p>}
+          {points.length >= 2 && mode !== 'underground' && (
+            <div className="parking-tools">
+              <button type="button" className="ghost-button" onClick={() => setParking(suggestParking(data, points[points.length - 1].coordinate))}>
+                🅿 Stationnement stratégique avant l'arrivée
+              </button>
+              {parking && parking.length === 0 && (
+                <p className="muted">Aucun parking connu à moins de 1,2 km. Marque un lieu avec le tag « parking » pour l'ajouter aux suggestions.</p>
+              )}
+              {parking?.map((place) => (
+                <button
+                  key={`${place.coordinate.join(',')}`}
+                  className="result-row"
+                  onClick={() => {
+                    // Voiture jusqu'au parking, puis à pied jusqu'à l'arrivée.
+                    const before = points.slice(0, -1).map((point, i) => (i === points.length - 2 ? { ...point, travel: 'car' as const } : point));
+                    onPointsChange([...before, { coordinate: place.coordinate, label: `🅿 ${place.name}`, travel: 'foot' }, points[points.length - 1]]);
+                    setParking(undefined);
+                  }}
+                >
+                  <span>🅿 {place.name}</span>
+                  <small>
+                    {place.reason} · {formatDistance(place.walkM)} à pied
+                  </small>
+                </button>
+              ))}
+            </div>
+          )}
+          {status === 'loading' && <p className="muted">Calcul en cours…</p>}
+          {message && <p className="muted hint">{message}</p>}
+
+          {candidates.length > 1 && (
+            <div className="route-candidates" role="radiogroup" aria-label="Variantes">
+              {candidates.map((candidate, index) => (
+                <button
+                  key={candidate.id}
+                  role="radio"
+                  aria-checked={selected === index}
+                  className={selected === index ? 'route-card selected' : 'route-card'}
+                  onClick={() => setSelected(index)}
+                >
+                  <strong>{candidate.label}</strong>
+                  <span>
+                    {formatDistance(candidate.distanceM)} · {formatDuration(candidate.durationMin)}
+                  </span>
+                  <span className={`risk-badge ${riskClass[candidate.analysis.risk]}`}>{candidate.analysis.risk}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {current && (
+            <div className="route-summary">
+              <div className="route-headline">
+                <span
+                  className={`risk-badge ${riskClass[current.underground ? (riskRank[current.underground.risk as keyof typeof riskRank] > riskRank[current.analysis.risk] ? current.underground.risk : current.analysis.risk) : current.analysis.risk]}`}
+                >
+                  Risque{' '}
+                  {current.underground && riskRank[current.underground.risk as keyof typeof riskRank] > riskRank[current.analysis.risk]
+                    ? current.underground.risk
+                    : current.analysis.risk}
+                </span>
+                <strong>{formatDistance(current.distanceM)}</strong>
+                <span>· {formatDuration(current.durationMin)}</span>
+              </div>
+              {current.underground && (
+                <p className="route-line">
+                  ▼ Entrée <b>{current.underground.entry}</b> → sortie <b>{current.underground.exit}</b> · {formatDistance(current.underground.lengthM)} sous terre ·{' '}
+                  {current.underground.levels.map((level) => `${level} (${levelNames[level as 0 | -1 | -2 | -3]})`).join(' → ')}
+                  {Boolean(current.underground.transitLines?.length) && <> · le long de {current.underground.transitLines?.join(', ')}</>}
+                </p>
+              )}
+              <h3>Territoires traversés</h3>
+              {current.analysis.territories.length === 0 && <p className="muted">Aucun territoire défini sur ce trajet.</p>}
+              {current.analysis.territories.map((crossing) => (
+                <div key={crossing.territoryId} className={`crossing ${crossing.stance ?? ''}`}>
+                  <button className="link-button" onClick={() => onOpen({ collection: 'territories', id: crossing.territoryId })}>
+                    {crossing.name}
+                  </button>
+                  <small>
+                    {formatDistance(crossing.distanceM)}
+                    {crossing.stance && ` · ${stanceOptions.find((option) => option.id === crossing.stance)?.name.toLowerCase()}`}
+                  </small>
+                  {crossing.traditions.length > 0 && (
+                    <p>{crossing.traditions.map((tradition) => `${tradition.name}${tradition.note ? ` : ${tradition.note}` : ''}`).join(' · ')}</p>
+                  )}
+                </div>
+              ))}
+              {current.analysis.dangers.length > 0 && (
+                <>
+                  <h3>Zones à risque</h3>
+                  {current.analysis.dangers.map((danger) => (
+                    <button key={danger.id} className="result-row" onClick={() => onOpen(danger)}>
+                      <span>⚠ {danger.name}</span>
+                      <small>à {formatDistance(danger.distanceM)}</small>
+                    </button>
+                  ))}
+                </>
+              )}
+              {current.analysis.places.length > 0 && (
+                <>
+                  <h3>Lieux importants proches</h3>
+                  {current.analysis.places.slice(0, 6).map((place) => (
+                    <button key={`${place.collection}/${place.id}`} className="result-row" onClick={() => onOpen(place)}>
+                      <span>{entityName(data, place)}</span>
+                      <small>à {formatDistance(place.distanceM)}</small>
+                    </button>
+                  ))}
+                </>
+              )}
+              <p className="sheet-dates">
+                Rues : {provider.label}. Le risque ne repose que sur les données de la chronique ; en voiture, un territoire hostile expose moins qu'à pied.
+              </p>
+            </div>
+          )}
+
+          <section className="saved-routes">
+            <h3>Itinéraires enregistrés</h3>
+            {points.length >= 2 && (
+              <form
+                className="save-route"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!saveName.trim()) return;
+                  void store.create('itineraries', {
+                    name: saveName.trim(),
+                    mode,
+                    points: points.map((point) => ({ coordinate: point.coordinate, label: point.label, travel: point.travel ?? null })),
+                  });
+                  setSaveName('');
+                }}
+              >
+                <input value={saveName} placeholder="Nom (ex. Havre → Elyseum, discret)" onChange={(event) => setSaveName(event.target.value)} />
+                <button className="ghost-button">Enregistrer</button>
+              </form>
+            )}
+            {data.itineraries.length === 0 && <p className="muted">Aucun itinéraire enregistré. Ils sont partagés avec l'autre joueur.</p>}
+            {data.itineraries.map((saved) => (
+              <div key={saved.id} className="saved-route">
+                <button
+                  className="result-row"
+                  onClick={() => {
+                    onModeChange(saved.mode as RouteMode);
+                    onPointsChange(saved.points.map((point) => ({ coordinate: point.coordinate, label: point.label, travel: point.travel ?? undefined })));
+                  }}
+                >
+                  <span>{saved.name}</span>
+                  <small>
+                    {modes.find((item) => item.id === saved.mode)?.label} · {saved.points.length} points
+                  </small>
+                </button>
+                <button className="icon-button" aria-label={`Supprimer ${saved.name}`} onClick={() => void store.remove('itineraries', saved.id)}>
+                  ×
+                </button>
+              </div>
+            ))}
+          </section>
+        </>
+      )}
     </aside>
   );
 }

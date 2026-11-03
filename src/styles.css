@@ -3513,3 +3513,164 @@ fieldset legend {
 .brand-mark:hover .brand-emblem .rv-wheel {
   transform: rotate(45deg);
 }
+
+/* ======================================================================
+   Téléphone : consultation et itinéraires
+   ====================================================================== */
+.sheet-handle {
+  display: none;
+}
+.itinerary-toggle {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.itinerary-toggle .chevron {
+  transition: transform var(--ease);
+  transform: rotate(90deg);
+  color: var(--text-muted);
+}
+.itinerary-panel.collapsed .itinerary-toggle .chevron {
+  transform: rotate(0deg);
+}
+.itinerary-panel.collapsed header {
+  margin-bottom: 0;
+}
+.itinerary-summary {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.route-slot {
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  gap: 10px;
+  align-items: start;
+  margin-bottom: 10px;
+}
+.route-slot select {
+  width: 100%;
+}
+.route-slot small {
+  display: block;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+.route-slot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.route-pin.start,
+.route-pin.end {
+  display: grid;
+  place-items: center;
+}
+.itinerary-panel.picking {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.itinerary-panel.picking p {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  /* Fiche : volet bas avec poignée, réductible pour dégager la carte. */
+  .right-panel {
+    max-height: 58%;
+    padding-top: 0;
+    transition: max-height 220ms ease;
+    overscroll-behavior: contain;
+  }
+  .right-panel.collapsed {
+    max-height: 128px;
+    overflow: hidden;
+  }
+  .sheet-handle {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 22px;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+  .sheet-handle i {
+    width: 40px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--line-strong);
+  }
+  .right-panel .sheet-header {
+    touch-action: pan-x;
+  }
+  .right-panel .sheet h2 {
+    font-size: 20px;
+  }
+  .right-panel .sheet-actions button,
+  .right-panel .result-row,
+  .right-panel .chip,
+  .right-panel .link-button {
+    min-height: 36px;
+  }
+
+  /* Itinéraire : volet bas pleine largeur au lieu d'un panneau qui couvre la carte. */
+  .floating-panel.itinerary-panel {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 62%;
+    border-radius: 14px 14px 0 0;
+    padding-bottom: 14px;
+    overscroll-behavior: contain;
+  }
+  .floating-panel.itinerary-panel.collapsed,
+  .floating-panel.itinerary-panel.picking {
+    max-height: none;
+  }
+  .itinerary-panel ~ .tool-dock {
+    display: none;
+  }
+  .route-slot-actions .ghost-button,
+  .itinerary-panel .segmented button {
+    min-height: 38px;
+  }
+
+  /* Menu contextuel (appui long) : feuille d'actions en bas d'écran. */
+  .context-menu {
+    position: fixed;
+    left: 8px !important;
+    right: 8px;
+    top: auto !important;
+    bottom: 76px;
+    max-height: 60vh;
+    overflow-y: auto;
+    border-radius: 14px;
+    z-index: 30;
+  }
+  .context-menu button {
+    min-height: 42px;
+  }
+
+  /* Contrôles de carte : zoom au pincement, boussole et attribution discrètes au-dessus du dock. */
+  .maplibregl-ctrl-group:has(.maplibregl-ctrl-zoom-in) .maplibregl-ctrl-zoom-in,
+  .maplibregl-ctrl-group:has(.maplibregl-ctrl-zoom-in) .maplibregl-ctrl-zoom-out {
+    display: none;
+  }
+  .maplibregl-ctrl-bottom-right,
+  .maplibregl-ctrl-bottom-left {
+    bottom: 64px;
+  }
+}

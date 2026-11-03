@@ -1,5 +1,5 @@
 import { SheetSection } from '../../components/Collapsible';
-import type { ReactNode } from 'react';
+import { useRef, useState, type ReactNode, type TouchEvent } from 'react';
 import { EntityPicker, Field, NumberInput, RefCombo, Select, TextArea, TextInput } from '../../components/forms';
 import { Facts, Importance, LinkChips, SheetFooter } from '../../components/EntitySheet';
 import { useEntityDraft } from '../../components/useEntityDraft';
@@ -34,10 +34,35 @@ export function EntityPanel(props: PanelProps) {
   const data = useChronicle();
   const { entityRef, onClose } = props;
   const entity = findEntity(data, entityRef.collection, entityRef.id);
+  // Téléphone : la fiche est un volet en bas d'écran, réductible (poignée ou glissement) pour voir la carte.
+  const [collapsed, setCollapsed] = useState(false);
+  const [shownId, setShownId] = useState(entityRef.id);
+  if (shownId !== entityRef.id) {
+    setShownId(entityRef.id);
+    setCollapsed(false);
+  }
+  const swipe = useRef<number | undefined>(undefined);
+  const onTouchEnd = (event: TouchEvent) => {
+    if (swipe.current === undefined) return;
+    const delta = event.changedTouches[0].clientY - swipe.current;
+    swipe.current = undefined;
+    if (Math.abs(delta) > 40) setCollapsed(delta > 0);
+  };
 
   return (
-    <aside className="right-panel" aria-label="Fiche de l'élément sélectionné">
-      <header className="sheet-header">
+    <aside className={collapsed ? 'right-panel collapsed' : 'right-panel'} aria-label="Fiche de l'élément sélectionné">
+      <button
+        type="button"
+        className="sheet-handle"
+        aria-label={collapsed ? 'Agrandir la fiche' : 'Réduire la fiche'}
+        aria-expanded={!collapsed}
+        onClick={() => setCollapsed(!collapsed)}
+        onTouchStart={(event) => (swipe.current = event.touches[0].clientY)}
+        onTouchEnd={onTouchEnd}
+      >
+        <i />
+      </button>
+      <header className="sheet-header" onTouchStart={(event) => (swipe.current = event.touches[0].clientY)} onTouchEnd={onTouchEnd}>
         <span className="eyebrow">{entityCollections[entityRef.collection].toUpperCase()}</span>
         <button type="button" className="close-button" onClick={onClose} aria-label="Fermer la fiche">
           ×

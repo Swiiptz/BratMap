@@ -131,6 +131,8 @@ export function MapPage({ select, focus, position, navigate, onOpen, fullscreen,
   const [drawTarget, setDrawTarget] = useState<'territory' | 'plotZone'>('territory');
   const [proximity, setProximity] = useState<{ center: Coordinate; radius: number }>();
   const [itinerary, setItinerary] = useState<RoutePoint[]>();
+  // Départ / arrivée en cours de choix sur la carte (outil `pick`).
+  const [routePick, setRoutePick] = useState<'start' | 'end'>();
   const [routeMode, setRouteMode] = usePreference<RouteMode>('routeMode', 'discreet');
   const [routeProfile, setRouteProfile] = usePreference<TravelProfile>('routeProfile', 'foot');
   const [route, setRoute] = useState<FeatureCollection>();
@@ -260,6 +262,7 @@ export function MapPage({ select, focus, position, navigate, onOpen, fullscreen,
   useEffect(() => setPathSegmentIds(undefined), [select?.id]);
 
   const cancelTool = () => {
+    setRoutePick(undefined);
     setTool('idle');
     setDraft([]);
     setRedoDraft([]);
@@ -280,6 +283,12 @@ export function MapPage({ select, focus, position, navigate, onOpen, fullscreen,
     setContextMenu(undefined);
     // Tracé souterrain : chaque clic proche d'un accès ou d'une jonction s'y accroche.
     const coordinate = tool === 'line' ? (resolveEndpoint(graph, clicked, SNAP_PX * metersPerPixel)?.coordinate ?? clicked) : clicked;
+    if (tool === 'pick') {
+      if (routePick) setRoutePoint(routePick, clicked);
+      setRoutePick(undefined);
+      setTool('idle');
+      return;
+    }
     if (tool === 'place') {
       setPending({ kind: 'point', collection: placeCollection, coordinate, model: placeModel ? 'manoir' : undefined });
       setTool('idle');
@@ -697,7 +706,17 @@ export function MapPage({ select, focus, position, navigate, onOpen, fullscreen,
           onProfileChange={setRouteProfile}
           onRouteChange={setRoute}
           onOpen={onOpen}
-          onClose={() => setItinerary(undefined)}
+          onClose={() => {
+            setItinerary(undefined);
+            if (tool === 'pick') cancelTool();
+          }}
+          picking={routePick}
+          onPickOnMap={(role) => {
+            setContextMenu(undefined);
+            setRoutePick(role);
+            setTool('pick');
+          }}
+          onCancelPick={cancelTool}
         />
       )}
 
@@ -810,7 +829,7 @@ export function MapPage({ select, focus, position, navigate, onOpen, fullscreen,
         onFullscreen={onToggleFullscreen}
       />
 
-      {tool !== 'idle' && (
+      {tool !== 'idle' && tool !== 'pick' && (
         <div className="placement-hint">
           {tool === 'place' &&
             `Clique sur la carte pour placer ${placeModel ? 'le bâtiment 3D' : placeCollection === 'havens' ? 'le havre' : placeCollection === 'undergroundAccess' ? "l'accès souterrain" : 'le lieu'}`}

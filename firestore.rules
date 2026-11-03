@@ -1,0 +1,12 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // bratMap fonctionne actuellement sans comptes applicatifs.
+    // À remplacer par une règle basée sur request.auth ou App Check
+    // avant d'utiliser des données sensibles en production.
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
